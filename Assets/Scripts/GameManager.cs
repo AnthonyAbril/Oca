@@ -140,51 +140,56 @@ public class GameManager : MonoBehaviour
 
     IEnumerator ProcesoMovimiento(int tipoJugador, int pasos)
     {
-        // Guardamos la posición inicial para la animación
         int posInicial = (tipoJugador == 1) ? posJugador : posIA;
+        int destinoFinal = Mathf.Clamp(posInicial + pasos, 0, 21);
 
-        // 1. Cálculo inicial
-        int nuevaPos = posInicial + pasos;
-        if (nuevaPos > 21) nuevaPos = 21;
-        if (nuevaPos < 0) nuevaPos = 0;
+        // 1. Calculamos colisión ANTES de mover nada
+        yield return ResolverColision(tipoJugador, destinoFinal, (resultado) => destinoFinal = resultado);
 
-        // 2. Resolución de COLISIÓN
-        int posOponente = (tipoJugador == 1) ? posIA : posJugador;
-        if (nuevaPos == posOponente && nuevaPos != 0 && nuevaPos != 21)
+        // 2. Movemos visualmente al destino (que ya incluye el ajuste de colisión)
+        yield return MoverFichaVisual(tipoJugador, posInicial, destinoFinal);
+
+        // 3. Actualizamos la lógica
+        ActualizarPosicionLogica(tipoJugador, destinoFinal);
+
+        // 4. Si el destino final es especial, aplicamos efecto
+        if (comprobarCasillaEspecial(destinoFinal))
         {
-            if (tipoJugador == 1)
+            yield return AplicarEfectoCasilla(tipoJugador, destinoFinal);
+        }
+
+        if (tipoJugador == 1) turnoFinalizado = true;
+    }
+
+    IEnumerator ResolverColision(int tipoJugador, int posDestino, System.Action<int> callback)
+    {
+        int posOponente = (tipoJugador == 1) ? posIA : posJugador;
+        int nuevaPos = posDestino;
+
+        // Si la casilla destino es la del oponente (y no es inicio o meta)
+        if (nuevaPos == posOponente && nuevaPos > 0 && nuevaPos < 21)
+        {
+            if (tipoJugador == 1) // Jugador
             {
                 panelColision.SetActive(true);
                 eleccionColision = 0;
                 yield return new WaitUntil(() => eleccionColision != 0);
+
+                // Si elige anterior (-1) o siguiente (+1)
                 nuevaPos = (eleccionColision == 1) ? nuevaPos - 1 : nuevaPos + 1;
+
                 panelColision.SetActive(false);
                 eleccionColision = 0;
             }
-            else
+            else // IA
             {
                 nuevaPos = DecidirMovimientoIA(nuevaPos);
             }
-            nuevaPos = Mathf.Clamp(nuevaPos, 0, 21);
         }
 
-        // 3. Ejecución del movimiento (PASO A PASO)
-        // Primero movemos visualmente desde el origen hasta la nuevaPos
-        yield return MoverFichaVisual(tipoJugador, posInicial, nuevaPos);
-        // Luego actualizamos la lógica interna
-        ActualizarPosicionLogica(tipoJugador, nuevaPos);
-
-        // 4. Efectos de casilla (Teleports, Retrocesos, etc.)
-        if (comprobarCasillaEspecial(nuevaPos))
-        {
-            // Guardamos donde estamos antes del efecto
-            int posAntesEfecto = nuevaPos;
-
-            // AplicarEfectoCasilla ahora debe gestionar sus propios movimientos paso a paso
-            yield return AplicarEfectoCasilla(tipoJugador, nuevaPos);
-        }
-
-        if (tipoJugador == 1) turnoFinalizado = true;
+        // Ultima validación de seguridad para no salir del array
+        nuevaPos = Mathf.Clamp(nuevaPos, 0, 21);
+        callback(nuevaPos);
     }
 
     // --- LÓGICA AUXILIAR ---
@@ -213,29 +218,30 @@ public class GameManager : MonoBehaviour
     {
         int efecto = infoCasillas[posActual];
         yield return new WaitForSeconds(0.5f);
-
         int destino = posActual;
 
         switch (efecto)
         {
-            case 1: // Teleport
-                destino = (posActual == 1) ? 7 : 13;
-                break;
-            case 2: // Volver a tirar
+            case 1: destino = (posActual == 1) ? 7 : 13; break;
+            case 2:
                 infoCasillas[posActual] = 0;
                 PintarTablero();
                 if (tipo == 1) moverJugador(tirarDado()); else moverIA(tirarDado());
-                yield break; // Salimos porque moverJugador iniciará su propia corrutina
-            case -1: // Retroceder 3
-                destino = Mathf.Max(0, posActual - 3);
-                break;
+                yield break;
+            case -1: destino = Mathf.Max(0, posActual - 3); break;
         }
 
         if (destino != posActual)
         {
-            // Animamos el efecto especial paso a paso
-            yield return MoverFichaVisual(tipo, posActual, destino);
-            ActualizarPosicionLogica(tipo, destino);
+            // --- CORRECCIÓN AQUÍ: Comprobar colisión tras el efecto ---
+            int destinoFinal = destino;
+            yield return ResolverColision(tipo, destino, (posAjustada) => destinoFinal = posAjustada);
+
+            yield return MoverFichaVisual(tipo, posActual, destinoFinal);
+            ActualizarPosicionLogica(tipo, destinoFinal);
+
+            // Si al rebotar por colisión cae en OTRA casilla especial, 
+            // podrías llamar recursivamente a AplicarEfectoCasilla si fuera necesario.
         }
     }
 
@@ -260,16 +266,22 @@ public class GameManager : MonoBehaviour
         GameObject ficha = (tipo == 1) ? fichaJugador : fichaIA;
         string prefijo = (tipo == 1) ? "POSICION JUGADOR: " : "POSICION IA: ";
 
+        // Si ya estamos en el destino, no hacemos nada
+        if (origen == destino) yield break;
+
         int paso = (origen < destino) ? 1 : -1;
 
-        for (int i = origen + paso; ; i += paso)
+        // Usamos un bucle que garantiza pasar por todas las casillas intermedias
+        int i = origen;
+        while (i != destino)
         {
-            ficha.transform.position = vectorObjetos[i].transform.position;
+            i += paso;
+            i = Mathf.Clamp(i, 0, 21); // SEGURIDAD: No salir de los límites del array 
 
+            ficha.transform.position = vectorObjetos[i].transform.position;
             textoPosicion.text = prefijo + i;
 
             yield return new WaitForSeconds(0.25f);
-            if (i == destino) break;
         }
     }
 

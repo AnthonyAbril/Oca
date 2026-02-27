@@ -1386,6 +1386,8 @@ MonoBehaviour:
   textoDado: {fileID: 117189411}
   textoPosicion: {fileID: 1382455311}
   textoTurnos: {fileID: 908673624}
+  panelFinal: {fileID: 1280204365}
+  botonRestart: {fileID: 560812381}
   posJugador: 0
   posIA: 0
 --- !u!4 &458912793
@@ -1966,7 +1968,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 458912792}
         m_TargetAssemblyTypeName: GameManager, Assembly-CSharp
-        m_MethodName: OnClickAnterior
+        m_MethodName: ReiniciarJuego
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -2591,7 +2593,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 458912792}
         m_TargetAssemblyTypeName: GameManager, Assembly-CSharp
-        m_MethodName: OnClickSiguiente
+        m_MethodName: SalirJuego
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
