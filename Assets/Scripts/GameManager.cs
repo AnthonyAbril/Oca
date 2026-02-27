@@ -1,8 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
+using TMPro; // Recomendado para el Canvas
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro; // Recomendado para el Canvas
+using UnityEngine.SceneManagement; // REQUERIDO PARA REINICIAR
 
 public class GameManager : MonoBehaviour
 {
@@ -19,10 +20,14 @@ public class GameManager : MonoBehaviour
     public TextMeshProUGUI textoInfo; // Para la cola de eventos [cite: 101]
     public TextMeshProUGUI textoDado;
     public TextMeshProUGUI textoPosicion;
+    public TextMeshProUGUI textoTurnos;
+    public GameObject panelFinal;
+    public Button botonRestart;
 
     [Header("Estado")]
     public int posJugador = 0;
     public int posIA = 0;
+    private int contadorTurnos = 1; // Empezamos en el turno 1
     private bool turnoFinalizado = false;
     private int eleccionColision = 0; // 0: nada, 1: anterior, 2: siguiente
 
@@ -38,7 +43,9 @@ public class GameManager : MonoBehaviour
     {
         AsignarObjetosEscena();
         PintarTablero();
+        textoTurnos.text = "TURNO: " + contadorTurnos; // Mostrar "TURNO: 1" al empezar
         StartCoroutine(FlujoJuego());
+        panelFinal.SetActive(false);
     }
 
     // --- FLUJO DE TURNOS (PARTE 2) ---
@@ -46,34 +53,60 @@ public class GameManager : MonoBehaviour
     {
         while (!comprobarGanador(1) && !comprobarGanador(2))
         {
-            // TURNO JUGADOR
+            textoTurnos.text = "TURNO: " + contadorTurnos;
+
+            // --- TURNO JUGADOR ---
             textoInfo.text = "Turno del Jugador";
-            textoPosicion.text = "POSICION: " + posJugador;
+            // IMPORTANTE: Forzamos que el marcador muestre la posición del JUGADOR 
+            // antes de que este pueda interactuar.
+            textoPosicion.text = "POSICION JUGADOR: " + posJugador;
+
             botonDado.interactable = true;
             yield return new WaitUntil(() => turnoFinalizado);
             turnoFinalizado = false;
 
             if (comprobarGanador(1)) break;
 
-            // TURNO IA
+            // --- TURNO IA ---
             yield return new WaitForSeconds(1.5f);
             textoInfo.text = "Turno de la IA";
-            textoPosicion.text = "POSICION: " + posIA;
+            // Forzamos que el marcador muestre la posición de la IA antes de que se mueva
+            textoPosicion.text = "POSICION IA: " + posIA;
 
-            // 1. Tirada de dado de la IA
             int dadoIA = tirarDado();
-
-            // 2. PAUSA de 1 segundo para que el usuario vea el dado de la IA
             yield return new WaitForSeconds(1.0f);
 
-            // 3. Mover ficha de la IA
+            // El movimiento de la IA actualizará el texto paso a paso
             moverIA(dadoIA);
 
-            // Esperar a que la IA termine su movimiento (incluyendo efectos)
-            // Usamos un pequeño delay extra para que no empiece el turno del jugador de golpe
-            yield return new WaitForSeconds(2.0f);
+            // Aumentamos ligeramente este tiempo para asegurar que la corrutina 
+            // de movimiento visual de la IA haya terminado antes de pasar al siguiente turno
+            yield return new WaitForSeconds(3.0f);
+
+            if (!comprobarGanador(2))
+            {
+                contadorTurnos++;
+            }
         }
         textoInfo.text = comprobarGanador(1) ? "HAS GANADO!" : "LA IA HA GANADO";
+
+        // ACTIVAR EL PANEL FINAL
+        if (panelFinal != null)
+        {
+            panelFinal.SetActive(true);
+        }
+    }
+
+    // --- NUEVO MÉTODO PARA EL BOTÓN RESTART ---
+    public void ReiniciarJuego()
+    {
+        // Recarga la escena activa actual
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    public void SalirJuego()
+    {
+        Application.Quit();
     }
 
     // Se llama desde el botón del dado en el Canvas
@@ -97,58 +130,57 @@ public class GameManager : MonoBehaviour
 
     public void moverJugador(int pasos)
     {
-        textoPosicion.text = "POSICION: " + posJugador;
         StartCoroutine(ProcesoMovimiento(1, pasos));
-        textoPosicion.text = "POSICION: " + posJugador;
     }
 
     public void moverIA(int pasos)
     {
-        textoPosicion.text = "POSICION: " + posIA;
         StartCoroutine(ProcesoMovimiento(2, pasos));
-        textoPosicion.text = "POSICION: " + posIA;
     }
 
     IEnumerator ProcesoMovimiento(int tipoJugador, int pasos)
     {
+        // Guardamos la posición inicial para la animación
+        int posInicial = (tipoJugador == 1) ? posJugador : posIA;
+
         // 1. Cálculo inicial
-        int nuevaPos = (tipoJugador == 1) ? posJugador + pasos : posIA + pasos;
+        int nuevaPos = posInicial + pasos;
         if (nuevaPos > 21) nuevaPos = 21;
+        if (nuevaPos < 0) nuevaPos = 0;
 
-        // 2. Resolución de COLISIÓN (Punto 1.d de la Parte 2)
+        // 2. Resolución de COLISIÓN
         int posOponente = (tipoJugador == 1) ? posIA : posJugador;
-
-        // Si la casilla de destino es la del oponente (y no es salida/meta)
         if (nuevaPos == posOponente && nuevaPos != 0 && nuevaPos != 21)
         {
-            if (tipoJugador == 1) // Jugador elige con botones [cite: 263]
+            if (tipoJugador == 1)
             {
                 panelColision.SetActive(true);
                 eleccionColision = 0;
                 yield return new WaitUntil(() => eleccionColision != 0);
-
                 nuevaPos = (eleccionColision == 1) ? nuevaPos - 1 : nuevaPos + 1;
-
                 panelColision.SetActive(false);
                 eleccionColision = 0;
             }
-            else // IA decide automáticamente 
+            else
             {
-                // Forzamos a la IA a calcular una posición distinta
                 nuevaPos = DecidirMovimientoIA(nuevaPos);
             }
-
-            // Ajuste de seguridad para no salir del tablero tras el rebote
             nuevaPos = Mathf.Clamp(nuevaPos, 0, 21);
         }
 
-        // 3. Ejecución del movimiento final
+        // 3. Ejecución del movimiento (PASO A PASO)
+        // Primero movemos visualmente desde el origen hasta la nuevaPos
+        yield return MoverFichaVisual(tipoJugador, posInicial, nuevaPos);
+        // Luego actualizamos la lógica interna
         ActualizarPosicionLogica(tipoJugador, nuevaPos);
-        yield return MoverFichaVisual(tipoJugador, nuevaPos);
 
-        // 4. Efectos de casilla (después de mover)
+        // 4. Efectos de casilla (Teleports, Retrocesos, etc.)
         if (comprobarCasillaEspecial(nuevaPos))
         {
+            // Guardamos donde estamos antes del efecto
+            int posAntesEfecto = nuevaPos;
+
+            // AplicarEfectoCasilla ahora debe gestionar sus propios movimientos paso a paso
             yield return AplicarEfectoCasilla(tipoJugador, nuevaPos);
         }
 
@@ -177,28 +209,33 @@ public class GameManager : MonoBehaviour
         return (Random.value > 0.5f) ? siguiente : anterior;
     }
 
-    IEnumerator AplicarEfectoCasilla(int tipo, int pos)
+    IEnumerator AplicarEfectoCasilla(int tipo, int posActual)
     {
-        int efecto = infoCasillas[pos];
+        int efecto = infoCasillas[posActual];
         yield return new WaitForSeconds(0.5f);
+
+        int destino = posActual;
 
         switch (efecto)
         {
-            case 1: // Teleport [cite: 14]
-                int destino = (pos == 1) ? 7 : 13;
-                ActualizarPosicionLogica(tipo, destino);
-                yield return MoverFichaVisual(tipo, destino);
+            case 1: // Teleport
+                destino = (posActual == 1) ? 7 : 13;
                 break;
-            case 2: // Volver a tirar [cite: 15]
-                infoCasillas[pos] = 0; // Se vuelve neutra (Extra 2) 
+            case 2: // Volver a tirar
+                infoCasillas[posActual] = 0;
                 PintarTablero();
                 if (tipo == 1) moverJugador(tirarDado()); else moverIA(tirarDado());
-                    break;
-            case -1: // Retroceder 3 [cite: 16]
-                int retro = Mathf.Max(0, pos - 3);
-                ActualizarPosicionLogica(tipo, retro);
-                yield return MoverFichaVisual(tipo, retro);
+                yield break; // Salimos porque moverJugador iniciará su propia corrutina
+            case -1: // Retroceder 3
+                destino = Mathf.Max(0, posActual - 3);
                 break;
+        }
+
+        if (destino != posActual)
+        {
+            // Animamos el efecto especial paso a paso
+            yield return MoverFichaVisual(tipo, posActual, destino);
+            ActualizarPosicionLogica(tipo, destino);
         }
     }
 
@@ -218,12 +255,22 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    IEnumerator MoverFichaVisual(int tipo, int destino)
+    IEnumerator MoverFichaVisual(int tipo, int origen, int destino)
     {
         GameObject ficha = (tipo == 1) ? fichaJugador : fichaIA;
-        // Desplazamiento suave entre casillas 
-        ficha.transform.position = vectorObjetos[destino].transform.position;
-        yield return null;
+        string prefijo = (tipo == 1) ? "POSICION JUGADOR: " : "POSICION IA: ";
+
+        int paso = (origen < destino) ? 1 : -1;
+
+        for (int i = origen + paso; ; i += paso)
+        {
+            ficha.transform.position = vectorObjetos[i].transform.position;
+
+            textoPosicion.text = prefijo + i;
+
+            yield return new WaitForSeconds(0.25f);
+            if (i == destino) break;
+        }
     }
 
     public bool comprobarCasillaEspecial(int numCasilla)
